@@ -1,7 +1,10 @@
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
-function Ensure-Dir([string]$d){ if(-not(Test-Path -LiteralPath $d)){[void][IO.Directory]::CreateDirectory($d)} }
+# ---- Helpers ----
+function Ensure-Dir([string]$d){
+  if(-not(Test-Path -LiteralPath $d)){[void][IO.Directory]::CreateDirectory($d)}
+}
 function RelPath($root,$path){
   try{
     $r=(Resolve-Path $root).Path; if(-not $r.EndsWith('\')){$r+='\'}
@@ -14,7 +17,9 @@ function RelPath($root,$path){
     return Split-Path $pn -Leaf
   }
 }
+function Log($m){ $txtOut.AppendText($m+[Environment]::NewLine); [Windows.Forms.Application]::DoEvents() }
 
+# ---- UI ----
 $form = New-Object Windows.Forms.Form
 $form.Text="Batch Copy/Move (preserve structure)"
 $form.StartPosition='CenterScreen'
@@ -29,7 +34,7 @@ function Add-Button($txt,$x,$y,$w){$b=New-Object Windows.Forms.Button;$b.Text=$t
 $lblSrc=Add-Label "Source root:" 15 20
 $txtSrc=Add-TextBox 120 18 640
 $btnSrc=Add-Button "Browse..." 770 17 80
-$btnSrc.Add_Click({$fbd=New-Object Windows.Forms.FolderBrowserDialog;if($fbd.ShowDialog() -eq 'OK'){$txtSrc.Text=$fbd.SelectedPath}})
+$btnSrc.Add_Click({$fbd=New-Object Windows.Forms.FolderBrowserDialog;if($fbd.ShowDialog() -eq 'OK'){$txtSrc.Text=$fbd.SelectedPath; $global:enumerators=$null }})
 
 $lblDst=Add-Label "Destination root:" 15 55
 $txtDst=Add-TextBox 120 53 640
@@ -38,7 +43,7 @@ $btnDst.Add_Click({$fbd=New-Object Windows.Forms.FolderBrowserDialog;if($fbd.Sho
 
 $grp=New-Object Windows.Forms.GroupBox;$grp.Text="Action";$grp.Location=New-Object Drawing.Point(18,90);$grp.Size=New-Object Drawing.Size(250,60)
 $optCopy=New-Object Windows.Forms.RadioButton;$optCopy.Text="Copy";$optCopy.Location=New-Object Drawing.Point(15,25);$optCopy.Checked=$true
-$optMove=New-Object Windows.Forms.RadioButton;$optMove.Text="Move (free source space)";$optMove.Location=New-Object Drawing.Point(75,25)
+$optMove=New-Object Windows.Forms.RadioButton;$optMove.Text="Move";$optMove.Location=New-Object Drawing.Point(75,25)
 $grp.Controls.AddRange(@($optCopy,$optMove));$form.Controls.Add($grp)
 
 $lblBatch=Add-Label "Files per batch:" 285 110
@@ -46,7 +51,8 @@ $nudBatch=New-Object Windows.Forms.NumericUpDown;$nudBatch.Minimum=1;$nudBatch.M
 $chkDry=New-Object Windows.Forms.CheckBox;$chkDry.Text="Dry run (no changes)";$chkDry.Location=New-Object Drawing.Point(500,108);$chkDry.AutoSize=$true;$form.Controls.Add($chkDry)
 
 $lblFilter=Add-Label "Optional file filter (e.g. *.pdf;*.docx):" 15 160
-$txtFilter=Add-TextBox 260 157 505;$txtFilter.Text='*'
+$txtFilter=Add-TextBox 260 157 505; $txtFilter.Text='*'
+$txtFilter.Add_TextChanged({ $global:enumerators=$null })  # reset pipeline if filter changes
 
 $lblLog=Add-Label "CSV log (optional):" 15 195
 $txtLog=Add-TextBox 120 192 640
@@ -55,7 +61,8 @@ $btnLog.Add_Click({$dlg=New-Object Windows.Forms.SaveFileDialog;$dlg.Filter="CSV
 
 $btnEst=Add-Button "Estimate count" 18 232 120
 $btnRun=Add-Button "Process NEXT batch" 150 232 160
-$btnCancel=Add-Button "Cancel" 320 232 120;$btnCancel.Enabled=$false
+$btnReset=Add-Button "Reset pipeline" 320 232 120
+$btnReset.Add_Click({ $global:enumerators=$null; Log "Pipeline reset. Next run will scan from the start." })
 
 $txtOut=New-Object Windows.Forms.TextBox
 $txtOut.Location=New-Object Drawing.Point(18,275)
@@ -63,7 +70,46 @@ $txtOut.Multiline=$true;$txtOut.ScrollBars='Vertical';$txtOut.ReadOnly=$true
 $txtOut.Font=New-Object Drawing.Font('Consolas',9)
 $txtOut.Size=New-Object Drawing.Size(840,260)
 $form.Controls.Add($txtOut)
-function Log($m){$txtOut.AppendText($m+[Environment]::NewLine);[Windows.Forms.Application]::DoEvents()}
+
+# ---- Batching/resume state ----
+$global:enumerators = $null  # array of IEnumerator[string] (one per pattern)
+$global:activeIndex = 0      # which enumerator is currently active
+
+function Build-Enumerators {
+  $src = $txtSrc.Text.Trim()
+  $patterns = ($txtFilter.Text.Trim() -split ';' | ForEach-Object { if([string]::IsNullOrWhiteSpace($_)){'*'} else { $_ } })
+  $list = New-Object System.Collections.Generic.List[System.Collections.Generic.IEnumerator[string]]
+  foreach($p in $patterns){
+    $enum = [IO.Directory]::EnumerateFiles($src,$p,[IO.SearchOption]::AllDirectories).GetEnumerator()
+    $null = $enum.MoveNext() # prime first item (Current valid if any)
+    $list.Add($enum) | Out-Null
+  }
+  $global:enumerators = $list.ToArray()
+  $global:activeIndex = 0
+}
+
+function Has-NextItem {
+  if(-not $global:enumerators -or $global:enumerators.Count -eq 0){ return $false }
+  for($i=$global:activeIndex; $i -lt $global:enumerators.Count; $i++){
+    $e = $global:enumerators[$i]
+    if($e -and $e.Current){ $global:activeIndex = $i; return $true }
+    # advance until something exists
+    while($e -and $e.MoveNext()){ if($e.Current){ $global:activeIndex = $i; return $true } }
+  }
+  return $false
+}
+
+function Next-Item {
+  $i = $global:activeIndex
+  $e = $global:enumerators[$i]
+  $current = $e.Current
+  # move to next for future call
+  if(-not $e.MoveNext()){
+    # exhausted this enumerator; move to next one
+    $global:activeIndex = $i + 1
+  }
+  return $current
+}
 
 function Validate-Roots{
   $s=$txtSrc.Text.Trim();$d=$txtDst.Text.Trim()
@@ -72,46 +118,67 @@ function Validate-Roots{
   return @{Source=$s;Dest=$d}
 }
 
+# ---- Buttons ----
 $btnEst.Add_Click({
   $r=Validate-Roots;if(-not $r){return}
+  # fresh single-pass count (don’t reuse enumerator state)
   $patterns=$txtFilter.Text.Trim() -split ';'
   $count=0
-  foreach($p in $patterns){foreach($f in [IO.Directory]::EnumerateFiles($r.Source,$p,[IO.SearchOption]::AllDirectories)){$count++;if($count%1000-eq0){[Windows.Forms.Application]::DoEvents()}}}
+  foreach($p in $patterns){ foreach($f in [IO.Directory]::EnumerateFiles($r.Source,$p,[IO.SearchOption]::AllDirectories)){ $count++; if($count%2000 -eq 0){[Windows.Forms.Application]::DoEvents()} } }
   Log "Estimated files matching filter: $count"
 })
 
 $btnRun.Add_Click({
   $r=Validate-Roots;if(-not $r){return}
-  $batch=[int]$nudBatch.Value;$move=$optMove.Checked;$dry=$chkDry.Checked
-  $patterns=$txtFilter.Text.Trim() -split ';';$logp=$txtLog.Text.Trim()
-  $rows=New-Object System.Collections.Generic.List[object];$processed=0;$errors=0
-  $btnRun.Enabled=$false;$btnCancel.Enabled=$true
-  foreach($p in $patterns){
-    foreach($f in [IO.Directory]::EnumerateFiles($r.Source,$p,[IO.SearchOption]::AllDirectories)){
-      if($processed -ge $batch){break}
-      $rel=RelPath $r.Source $f
-      $target=Join-Path $r.Dest $rel
-      Ensure-Dir (Split-Path $target -Parent)
-      $act=if($move){"Move"}else{"Copy"}
-      try{
-        if(-not $dry){
-          if($move){[IO.File]::Move($f,$target,$false)}else{[IO.File]::Copy($f,$target,$true)}
-        }
-        $rows.Add([pscustomobject]@{Timestamp=Get-Date;Action=$act;Status='Done';Source=$f;Target=$target;Message='OK'})|Out-Null
-        Log "[$act] $f -> $target"
-        $processed++
-      }catch{
-        $errors++
-        $rows.Add([pscustomobject]@{Timestamp=Get-Date;Action=$act;Status='Error';Source=$f;Target=$target;Message=$_.Exception.Message})|Out-Null
-        Log "Error: $($_.Exception.Message)"
+  if(-not $global:enumerators){ Build-Enumerators }
+
+  $batch=[int]$nudBatch.Value; $move=$optMove.Checked; $dry=$chkDry.Checked
+  $logp=$txtLog.Text.Trim()
+  $rows=New-Object System.Collections.Generic.List[object]
+  $processed=0; $errors=0
+
+  while($processed -lt $batch -and (Has-NextItem)){
+    $f = Next-Item
+    if(-not $f){ break }
+    # If Move was used in a previous batch, file might already be gone -> skip quietly
+    if(-not (Test-Path -LiteralPath $f)){ continue }
+
+    $rel = RelPath $r.Source $f
+    $target = Join-Path $r.Dest $rel
+    Ensure-Dir (Split-Path $target -Parent)
+    $act = if($move){"Move"}else{"Copy"}
+    try{
+      if(-not $dry){
+        if($move){ [IO.File]::Move($f,$target,$false) } else { [IO.File]::Copy($f,$target,$true) }
       }
-      if($processed -ge $batch){break}
+      $rows.Add([pscustomobject]@{Timestamp=Get-Date;Action=$act;Status='Done';Source=$f;Target=$target;Message='OK'})|Out-Null
+      Log "[$act] $f -> $target"
+      $processed++
+    }catch{
+      $errors++
+      $rows.Add([pscustomobject]@{Timestamp=Get-Date;Action=$act;Status='Error';Source=$f;Target=$target;Message=$_.Exception.Message})|Out-Null
+      Log "Error: $($_.Exception.Message)"
     }
-    if($processed -ge $batch){break}
   }
-  if($logp){try{$rows|Export-Csv -Path $logp -NoTypeInformation -Force}catch{Log "Log write failed: $($_.Exception.Message)"}}
-  Log "Batch complete. Files: $processed, Errors: $errors"
-  $btnRun.Enabled=$true;$btnCancel.Enabled=$false
+
+  if($processed -eq 0 -and -not (Has-NextItem)){
+    Log "No more files to process. (Pipeline exhausted)"
+  } else {
+    Log "Batch complete. Files: $processed, Errors: $errors"
+  }
+
+  if($logp){ try{ $rows | Export-Csv -Path $logp -NoTypeInformation -Append:$(Test-Path $logp) -Force } catch{ Log "Log write failed: $($_.Exception.Message)" } }
 })
+
+# Output box
+$txtOut=New-Object Windows.Forms.TextBox
+$txtOut.Location=New-Object Drawing.Point(18,275)
+$txtOut.Multiline=$true;$txtOut.ScrollBars='Vertical';$txtOut.ReadOnly=$true
+$txtOut.Font=New-Object Drawing.Font('Consolas',9)
+$txtOut.Size=New-Object Drawing.Size(840,260)
+$form.Controls.Add($txtOut)
+
+# re-add after creation to ensure $txtOut exists for Log()
+$form.Controls.Remove($txtOut); $form.Controls.Add($txtOut)
 
 [void]$form.ShowDialog()
