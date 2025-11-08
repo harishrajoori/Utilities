@@ -1,6 +1,8 @@
-# BatchCopyGUI_Distribute_ETA.ps1 — Even distribution, single-run, progress + ETA (PowerShell 5.1)
+# BatchCopyGUI_Distribute_ETA_Final.ps1
+# Even distribution across batches + progress bar + ETA
+# PowerShell 5.1 compatible (no ternary operators)
 
-# Relaunch in STA and keep console visible if started via "Run with PowerShell"
+# Relaunch in STA if needed
 if ($host.Runspace.ApartmentState -ne 'STA') {
   $argsList = "-NoProfile -ExecutionPolicy Bypass -NoExit -STA -File `"$PSCommandPath`""
   Start-Process -FilePath "powershell.exe" -ArgumentList $argsList
@@ -11,7 +13,8 @@ trap {
   try {
     [System.Windows.Forms.MessageBox]::Show(
       ($_.Exception.Message + "`r`n`r`n" + $_.InvocationInfo.PositionMessage),
-      "Error", 0, 16) | Out-Null
+      "Error", 0, 16
+    ) | Out-Null
   } catch {}
   break
 }
@@ -36,19 +39,19 @@ function RelPath($root,$path){
     return Split-Path $pn -Leaf
   }
 }
-# PS 5.1: emulate overwrite-safe move
+# Move file safely for PowerShell 5.1
 function Move-FileCompat {
   param([Parameter(Mandatory)][string]$Source,
         [Parameter(Mandatory)][string]$Destination)
   if (Test-Path -LiteralPath $Destination) { Remove-Item -LiteralPath $Destination -Force }
-  try   { [System.IO.File]::Move($Source, $Destination) }   # 2-arg move on .NET Framework
+  try   { [System.IO.File]::Move($Source, $Destination) }
   catch { [System.IO.File]::Copy($Source, $Destination, $true); Remove-Item -LiteralPath $Source -Force }
 }
 function BatchIndexFromRelPath([string]$rel, [int]$batches){
   $sha=[System.Security.Cryptography.SHA1]::Create()
   $bytes=[System.Text.Encoding]::UTF8.GetBytes($rel)
   $h=$sha.ComputeHash($bytes)
-  $num=[BitConverter]::ToUInt32($h,0)  # 32-bit slice
+  $num=[BitConverter]::ToUInt32($h,0)
   return ($num % $batches) + 1
 }
 function BatchRootAt([string]$destBase,[string]$prefix,[int]$index){
@@ -58,6 +61,16 @@ function BatchRootAt([string]$destBase,[string]$prefix,[int]$index){
 function Format-ETA([TimeSpan]$ts){
   if($ts.TotalHours -ge 1){ return ("{0:hh\:mm\:ss}" -f $ts) }
   else { return ("{0:mm\:ss}" -f $ts) }
+}
+function Get-TotalCount($root,$patterns){
+  $count=0
+  foreach($p in $patterns){
+    foreach($f in [System.IO.Directory]::EnumerateFiles($root,$p,[System.IO.SearchOption]::AllDirectories)){
+      $count++
+      if($count%5000 -eq 0){ [System.Windows.Forms.Application]::DoEvents() }
+    }
+  }
+  return $count
 }
 
 # ---------- UI ----------
@@ -91,20 +104,22 @@ $grpAct.Controls.AddRange(@($optCopy,$optMove)); $form.Controls.Add($grpAct)
 
 $grpMode = New-Object System.Windows.Forms.GroupBox
 $grpMode.Text="Distribution mode (choose ONE)"; $grpMode.Location=New-Object System.Drawing.Point(290, 90); $grpMode.Size=New-Object System.Drawing.Size(680, 64)
-
 $optByBatches = New-Object System.Windows.Forms.RadioButton; $optByBatches.Text="By number of batches"; $optByBatches.AutoSize=$true; $optByBatches.Location=New-Object System.Drawing.Point(15, 25); $optByBatches.Checked=$true
 $lblBatches  = Add-Label "Batches:" 400 110
 $nudBatches  = Add-NUD 460 107 1 100000 5
-
 $optBySize   = New-Object System.Windows.Forms.RadioButton; $optBySize.Text="By files per batch (auto-calc batches)"; $optBySize.AutoSize=$true; $optBySize.Location=New-Object System.Drawing.Point(180, 25)
 $lblFilesPer = Add-Label "Files per batch:" 600 110
 $nudFilesPer = Add-NUD 700 107 1 100000000 20000
-
 $grpMode.Controls.AddRange(@($optByBatches,$optBySize)); $form.Controls.Add($grpMode)
 
 $action = {
-  if ($optByBatches.Checked) { $nudBatches.Enabled=$true; $lblBatches.Enabled=$true; $nudFilesPer.Enabled=$false; $lblFilesPer.Enabled=$false }
-  else                       { $nudBatches.Enabled=$false; $lblBatches.Enabled=$false; $nudFilesPer.Enabled=$true; $lblFilesPer.Enabled=$true }
+  if ($optByBatches.Checked) {
+    $nudBatches.Enabled=$true; $lblBatches.Enabled=$true
+    $nudFilesPer.Enabled=$false; $lblFilesPer.Enabled=$false
+  } else {
+    $nudBatches.Enabled=$false; $lblBatches.Enabled=$false
+    $nudFilesPer.Enabled=$true; $lblFilesPer.Enabled=$true
+  }
 }
 $optByBatches.Add_CheckedChanged($action)
 $optBySize.Add_CheckedChanged($action)
@@ -112,7 +127,6 @@ $optBySize.Add_CheckedChanged($action)
 
 $lblPrefix = Add-Label "Batch folder prefix:" 15 160
 $txtPrefix = Add-TextBox 140 157 160; $txtPrefix.Text = "batch_"
-
 $chkDry = New-Object System.Windows.Forms.CheckBox
 $chkDry.Text="Dry run (no changes)"; $chkDry.AutoSize=$true; $chkDry.Location=New-Object System.Drawing.Point(320, 158)
 $form.Controls.Add($chkDry)
@@ -131,12 +145,9 @@ $progress.Location = New-Object System.Drawing.Point(18, 275)
 $progress.Size     = New-Object System.Drawing.Size(952, 26)
 $progress.Style    = 'Continuous'
 $form.Controls.Add($progress)
-
 $lblStatus = Add-Label "Status: idle" 18 310
 $lblETA    = Add-Label "ETA: --:--"   18 335
-
-$btnEstimate = Add-Button "Estimate count" 700 305 120
-$btnStart    = Add-Button "Start"           830 305 120
+$btnStart  = Add-Button "Start" 830 305 120
 
 # ---------- Core ----------
 function Validate-Roots {
@@ -145,40 +156,18 @@ function Validate-Roots {
   if(-not (Test-Path -LiteralPath $d)) { Ensure-Dir $d }
   @{ Source=$s; DestBase=$d }
 }
-function Get-TotalCount($root,$patterns){
-  $count=0
-  foreach($p in $patterns){
-    foreach($f in [System.IO.Directory]::EnumerateFiles($root,$p,[System.IO.SearchOption]::AllDirectories)){
-      $count++; if($count%5000 -eq 0){ [System.Windows.Forms.Application]::DoEvents() }
-    }
-  }
-  return $count
-}
-
-$btnEstimate.Add_Click({
-  $r=Validate-Roots; if(-not $r){return}
-  $patterns=($txtFilter.Text.Trim() -split ';' | ForEach-Object { if([string]::IsNullOrWhiteSpace($_)){'*'} else { $_ } })
-  $total = Get-TotalCount $r.Source $patterns
-  $batches = if($optBySize.Checked) {
-    $filesPer=[int]$nudFilesPer.Value
-    [int][Math]::Ceiling($total / [double]$filesPer)
-  } else { [int]$nudBatches.Value }
-  $lblStatus.Text = "Status: estimated $total files; planned batches = $batches"
-})
 
 $btnStart.Add_Click({
   $btnStart.Enabled = $false
-  $btnEstimate.Enabled = $false
-
-  $r=Validate-Roots; if(-not $r){ $btnStart.Enabled=$true; $btnEstimate.Enabled=$true; return }
+  $r=Validate-Roots; if(-not $r){ $btnStart.Enabled=$true; return }
   $prefix=$txtPrefix.Text.Trim(); if([string]::IsNullOrWhiteSpace($prefix)){ $prefix='batch_' }
   $patterns=($txtFilter.Text.Trim() -split ';' | ForEach-Object { if([string]::IsNullOrWhiteSpace($_)){'*'} else { $_ } })
   $move=$optMove.Checked; $dry=$chkDry.Checked
   $logp=$txtLog.Text.Trim()
 
-  # Count files (needed for progress/ETA and for auto batches)
+  # Count files
   $total = Get-TotalCount $r.Source $patterns
-  if($total -le 0){ [System.Windows.Forms.MessageBox]::Show("No matching files found."); $btnStart.Enabled=$true; $btnEstimate.Enabled=$true; return }
+  if($total -le 0){ [System.Windows.Forms.MessageBox]::Show("No matching files found."); $btnStart.Enabled=$true; return }
 
   $batches = if($optBySize.Checked){
     $filesPer=[int]$nudFilesPer.Value
@@ -186,19 +175,17 @@ $btnStart.Add_Click({
   } else { [int]$nudBatches.Value }
   if($batches -lt 1){ $batches = 1 }
 
-  # Pre-create batch roots
+  # Prepare batch roots
   for($i=1;$i -le $batches;$i++){ Ensure-Dir (BatchRootAt $r.DestBase $prefix $i) }
 
-  # Prepare progress
-  $progress.Minimum = 0; $progress.Maximum = $total; $progress.Value = 0
-  $lblStatus.Text = "Status: starting..."
-  $startTime = Get-Date
-  $done = 0; $errs = 0
-  $rows = if([string]::IsNullOrWhiteSpace($logp)){ $null } else { New-Object System.Collections.Generic.List[object] }
+  $progress.Minimum=0; $progress.Maximum=$total; $progress.Value=0
+  $lblStatus.Text="Status: starting..."
+  $startTime=Get-Date; $done=0; $errs=0
+  $rows=if([string]::IsNullOrWhiteSpace($logp)){ $null } else { New-Object System.Collections.Generic.List[object] }
 
   foreach($p in $patterns){
     foreach($f in [System.IO.Directory]::EnumerateFiles($r.Source,$p,[System.IO.SearchOption]::AllDirectories)){
-      if(-not (Test-Path -LiteralPath $f)) { continue }
+      if(-not (Test-Path -LiteralPath $f)){ continue }
 
       $rel = RelPath $r.Source $f
       $bi  = BatchIndexFromRelPath $rel $batches
@@ -206,42 +193,45 @@ $btnStart.Add_Click({
       $tgt = Join-Path $root $rel
       Ensure-Dir (Split-Path $tgt -Parent)
 
+      $act = if($move){'Move'} else {'Copy'}
       try{
         if(-not $dry){
           if($move){ Move-FileCompat -Source $f -Destination $tgt }
-          else     { [System.IO.File]::Copy($f, $tgt, $true) }
+          else     { [System.IO.File]::Copy($f,$tgt,$true) }
         }
-        if($rows){ $rows.Add([pscustomobject]@{Timestamp=Get-Date;Action=($move?'Move':'Copy');Status='Done';Source=$f;Target=$tgt;Batch=$bi;Message='OK'}) | Out-Null }
-      } catch {
+        if($rows){
+          $rows.Add([pscustomobject]@{
+            Timestamp=Get-Date;Action=$act;Status='Done';Source=$f;Target=$tgt;Batch=$bi;Message='OK'
+          })|Out-Null
+        }
+      }catch{
         $errs++
-        if($rows){ $rows.Add([pscustomobject]@{Timestamp=Get-Date;Action=($move?'Move':'Copy');Status='Error';Source=$f;Target=$tgt;Batch=$bi;Message=$_.Exception.Message}) | Out-Null }
+        if($rows){
+          $rows.Add([pscustomobject]@{
+            Timestamp=Get-Date;Action=$act;Status='Error';Source=$f;Target=$tgt;Batch=$bi;Message=$_.Exception.Message
+          })|Out-Null
+        }
       }
 
       $done++
-      if($done -le $progress.Maximum){ $progress.Value = $done }
-      # Update ETA every 200 files (keeps UI smooth)
+      if($done -le $progress.Maximum){ $progress.Value=$done }
       if($done % 200 -eq 0 -or $done -eq $total){
-        $elapsed = (Get-Date) - $startTime
-        $rate = if($elapsed.TotalSeconds -gt 0){ $done / $elapsed.TotalSeconds } else { 0 }
-        $remain = $total - $done
-        $etaTs = if($rate -gt 0){ [TimeSpan]::FromSeconds($remain / $rate) } else { [TimeSpan]::FromSeconds(0) }
-        $lblETA.Text = "ETA: " + (Format-ETA $etaTs)
-        $lblStatus.Text = "Status: $done / $total processed  |  Errors: $errs  |  Batches: $batches"
+        $elapsed=(Get-Date)-$startTime
+        $rate=if($elapsed.TotalSeconds -gt 0){$done/$elapsed.TotalSeconds}else{0}
+        $remain=$total-$done
+        $etaTs=if($rate -gt 0){[TimeSpan]::FromSeconds($remain/$rate)}else{[TimeSpan]::Zero}
+        $lblETA.Text="ETA: "+(Format-ETA $etaTs)
+        $lblStatus.Text="Status: $done / $total processed  |  Errors: $errs  |  Batches: $batches"
         [System.Windows.Forms.Application]::DoEvents()
       }
     }
   }
 
-  if($rows -ne $null){
-    try { $rows | Export-Csv -Path $logp -NoTypeInformation -Force }
-    catch { [System.Windows.Forms.MessageBox]::Show("Log write failed: $($_.Exception.Message)") }
-  }
-
-  $lblStatus.Text = "Status: COMPLETE — $done files, $errs errors, $batches batches"
-  $lblETA.Text = "ETA: 00:00"
-  [System.Windows.Forms.MessageBox]::Show("Complete: $done files, $errs errors across $batches batches.","Done",0,64) | Out-Null
-
-  $btnEstimate.Enabled = $true
+  if($rows){ try{ $rows|Export-Csv -Path $logp -NoTypeInformation -Force }catch{ [System.Windows.Forms.MessageBox]::Show("Log write failed: $($_.Exception.Message)") } }
+  $lblStatus.Text="Status: COMPLETE — $done files, $errs errors, $batches batches"
+  $lblETA.Text="ETA: 00:00"
+  [System.Windows.Forms.MessageBox]::Show("Complete: $done files, $errs errors across $batches batches.","Done",0,64)|Out-Null
+  $btnStart.Enabled=$true
 })
 
 [void]$form.ShowDialog()
