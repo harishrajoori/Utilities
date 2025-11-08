@@ -1,0 +1,27 @@
+PS C:\Users\manojmo> powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File "C:\Users\manojmo\Downloads\BatchCopyGUI_Final2.ps1"
+At C:\Users\manojmo\Downloads\BatchCopyGUI_Final2.ps1:231 char:41
++   $lblStatus.Text="Status: COMPLETE â€” $done files, $errs errors, $b ...
++                                         ~~~~~
+Unexpected token '$done' in expression or statement.
+At C:\Users\manojmo\Downloads\BatchCopyGUI_Final2.ps1:231 char:47
++   $lblStatus.Text="Status: COMPLETE â€” $done files, $errs errors, $b ...
++                                               ~~~~~
+Unexpected token 'files' in expression or statement.
+At C:\Users\manojmo\Downloads\BatchCopyGUI_Final2.ps1:231 char:52
++   $lblStatus.Text="Status: COMPLETE â€” $done files, $errs errors, $b ...
++                                                    ~
+Missing argument in parameter list.
+At C:\Users\manojmo\Downloads\BatchCopyGUI_Final2.ps1:233 char:111
++ ... e files, $errs errors across $batches batches.","Done",0,64)|Out-Null
++                                                          ~~~~~~~~~~~~~~~~
+The string is missing the terminator: ".
+At C:\Users\manojmo\Downloads\BatchCopyGUI_Final2.ps1:160 char:21
++ $btnStart.Add_Click({
++                     ~
+Missing closing '}' in statement block or type definition.
+At C:\Users\manojmo\Downloads\BatchCopyGUI_Final2.ps1:237 char:25
++ [void]$form.ShowDialog()
++                         ~
+Missing ')' in method call.
+    + CategoryInfo          : ParserError: (:) [], ParentContainsErrorRecordException
+    + FullyQualifiedErrorId : UnexpectedToken
