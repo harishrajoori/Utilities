@@ -1,0 +1,44 @@
+PS C:\Users\manojmo> powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File "C:\Users\manojmo\Downloads\BatchCopyGUI_Final2.ps1"
+At C:\Users\manojmo\Downloads\BatchCopyGUI_Final2.ps1:214 char:81
++ ... Add([pscustomobject]@{Timestamp=Get-Date;Action=($move?'Move':'Copy') ...
++                                                            ~~~~~~
+Unexpected token ''Move'' in expression or statement.
+At C:\Users\manojmo\Downloads\BatchCopyGUI_Final2.ps1:214 char:81
++ ... $rows.Add([pscustomobject]@{Timestamp=Get-Date;Action=($move?'Move':' ...
++                                                                  ~
+Missing closing ')' in expression.
+At C:\Users\manojmo\Downloads\BatchCopyGUI_Final2.ps1:214 char:81
++ ... $rows.Add([pscustomobject]@{Timestamp=Get-Date;Action=($move?'Move':' ...
++                                                                  ~
+The hash literal was incomplete.
+At C:\Users\manojmo\Downloads\BatchCopyGUI_Final2.ps1:214 char:80
++ ...  $rows.Add([pscustomobject]@{Timestamp=Get-Date;Action=($move?'Move': ...
++                                                                  ~
+Missing ')' in method call.
+At C:\Users\manojmo\Downloads\BatchCopyGUI_Final2.ps1:214 char:87
++ ... customobject]@{Timestamp=Get-Date;Action=($move?'Move':'Copy');Status ...
++                                                           ~~~~~~~
+Unexpected token ':'Copy'' in expression or statement.
+At C:\Users\manojmo\Downloads\BatchCopyGUI_Final2.ps1:214 char:18
++         if($rows){ $rows.Add([pscustomobject]@{Timestamp=Get-Date;Act ...
++                  ~
+Missing closing '}' in statement block or type definition.
+At C:\Users\manojmo\Downloads\BatchCopyGUI_Final2.ps1:209 char:10
++       try{
++          ~
+Missing closing '}' in statement block or type definition.
+At C:\Users\manojmo\Downloads\BatchCopyGUI_Final2.ps1:214 char:94
++ ... customobject]@{Timestamp=Get-Date;Action=($move?'Move':'Copy');Status ...
++                                                                  ~
+The Try statement is missing its Catch or Finally block.
+At C:\Users\manojmo\Downloads\BatchCopyGUI_Final2.ps1:200 char:112
++ ... umerateFiles($r.Source,$p,[System.IO.SearchOption]::AllDirectories)){
++                                                                         ~
+Missing closing '}' in statement block or type definition.
+At C:\Users\manojmo\Downloads\BatchCopyGUI_Final2.ps1:199 char:27
++   foreach($p in $patterns){
++                           ~
+Missing closing '}' in statement block or type definition.
+Not all parse errors were reported.  Correct the reported errors and try again.
+    + CategoryInfo          : ParserError: (:) [], ParentContainsErrorRecordException
+    + FullyQualifiedErrorId : UnexpectedToken
