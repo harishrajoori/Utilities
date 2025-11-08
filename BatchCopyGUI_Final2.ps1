@@ -144,7 +144,7 @@ $action = {
 }
 $optByBatches.Add_CheckedChanged($action)
 $optBySize.Add_CheckedChanged($action)
-& $action.Invoke()
+$null = $action.Invoke()   # <-- FIXED: just invoke; do not use & with .Invoke()
 
 $lblPrefix = Add-Label "Batch folder prefix:" 15 160
 $txtPrefix = Add-TextBox 140 157 160; $txtPrefix.Text = "batch_"
