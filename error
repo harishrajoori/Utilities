@@ -1,0 +1,43 @@
+At C:\Users\manojmo\Downloads\BatchCopyGUI_Final2.ps1:64 char:13
++     foreach([string]$f in [System.IO.Directory]::EnumerateFiles($root ...
++             ~
+Missing variable name after foreach.
+At C:\Users\manojmo\Downloads\BatchCopyGUI_Final2.ps1:64 char:24
++     foreach([string]$f in [System.IO.Directory]::EnumerateFiles($root ...
++                        ~~
+Unexpected token 'in' in expression or statement.
+At C:\Users\manojmo\Downloads\BatchCopyGUI_Final2.ps1:63 char:27
++   foreach($p in $patterns){
++                           ~
+Missing closing '}' in statement block or type definition.
+At C:\Users\manojmo\Downloads\BatchCopyGUI_Final2.ps1:61 char:42
++ function Get-TotalCount($root,$patterns) {
++                                          ~
+Missing closing '}' in statement block or type definition.
+At C:\Users\manojmo\Downloads\BatchCopyGUI_Final2.ps1:64 char:115
++ ... ::EnumerateFiles($root,$p,[System.IO.SearchOption]::AllDirectories)){
++                                                                        ~
+Unexpected token ')' in expression or statement.
+At C:\Users\manojmo\Downloads\BatchCopyGUI_Final2.ps1:67 char:3
++   }
++   ~
+Unexpected token '}' in expression or statement.
+At C:\Users\manojmo\Downloads\BatchCopyGUI_Final2.ps1:69 char:1
++ }
++ ~
+Unexpected token '}' in expression or statement.
+At C:\Users\manojmo\Downloads\BatchCopyGUI_Final2.ps1:286 char:13
++     foreach([string]$f in [System.IO.Directory]::EnumerateFiles($r.So ...
++             ~
+Missing variable name after foreach.
+At C:\Users\manojmo\Downloads\BatchCopyGUI_Final2.ps1:286 char:24
++     foreach([string]$f in [System.IO.Directory]::EnumerateFiles($r.So ...
++                        ~~
+Unexpected token 'in' in expression or statement.
+At C:\Users\manojmo\Downloads\BatchCopyGUI_Final2.ps1:285 char:27
++   foreach($p in $patterns){
++                           ~
+Missing closing '}' in statement block or type definition.
+Not all parse errors were reported.  Correct the reported errors and try again.
+    + CategoryInfo          : ParserError: (:) [], ParentContainsErrorRecordException
+    + FullyQualifiedErrorId : MissingVariableNameAfterForeach
