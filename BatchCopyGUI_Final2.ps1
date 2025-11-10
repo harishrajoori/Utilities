@@ -1,5 +1,5 @@
-# BatchCopyGUI_Distribute_ETA_UI_Cleanup.ps1
-# Clean UI + even distribution + progress + ETA
+# BatchCopyGUI_Final.ps1
+# Clean UI + even distribution across batches + progress + ETA
 # Auto-delete empty source folders after MOVE (not in dry run)
 # PowerShell 5.1 compatible (ASCII only)
 
@@ -47,31 +47,34 @@ function Move-FileCompat {
   catch { [System.IO.File]::Copy($Source, $Destination, $true); Remove-Item -LiteralPath $Source -Force }
 }
 function BatchIndexFromRelPath([string]$rel, [int]$batches) {
-  $sha=[System.Security.Cryptography.SHA1]::Create()
-  $bytes=[System.Text.Encoding]::UTF8.GetBytes($rel)
-  $h=$sha.ComputeHash($bytes)
-  $num=[BitConverter]::ToUInt32($h,0)
+  $sha = [System.Security.Cryptography.SHA1]::Create()
+  $bytes = [System.Text.Encoding]::UTF8.GetBytes($rel)
+  $h = $sha.ComputeHash($bytes)
+  $num = [BitConverter]::ToUInt32($h, 0)
   return ($num % $batches) + 1
 }
 function BatchRootAt([string]$destBase,[string]$prefix,[int]$index) {
-  $name=("{0}{1:D2}" -f $prefix,$index)
+  $name = ("{0}{1:D2}" -f $prefix, $index)
   return (Join-Path $destBase $name)
 }
-function Format-ETA([TimeSpan]$ts) { if ($ts.TotalHours -ge 1) { "{0:hh\:mm\:ss}" -f $ts } else { "{0:mm\:ss}" -f $ts } }
+function Format-ETA([TimeSpan]$ts) {
+  if ($ts.TotalHours -ge 1) { return ("{0:hh\:mm\:ss}" -f $ts) }
+  else { return ("{0:mm\:ss}" -f $ts) }
+}
 function Get-TotalCount($root,$patterns) {
-  $count=0
-  foreach($p in $patterns){
-    foreach([string]$f in [System.IO.Directory]::EnumerateFiles($root,$p,[System.IO.SearchOption]::AllDirectories)){
-      $count++; if($count%5000 -eq 0){ [System.Windows.Forms.Application]::DoEvents() }
+  $count = 0
+  foreach ($p in $patterns) {
+    foreach ($f in [System.IO.Directory]::EnumerateFiles($root, $p, [System.IO.SearchOption]::AllDirectories)) {
+      $count++
+      if ($count % 5000 -eq 0) { [System.Windows.Forms.Application]::DoEvents() }
     }
   }
-  $count
+  return $count
 }
 function AnchorLR($ctrl){ $ctrl.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right }
 function AnchorBR($ctrl){ $ctrl.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right }
-function AnchorLRB($ctrl){ $ctrl.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right }
 
-# ---------- UI (wider, no truncation) ----------
+# ---------- UI (wide, no truncation) ----------
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "Distribute Copy/Move - balanced batches (progress + ETA)"
 $form.StartPosition = 'CenterScreen'
@@ -282,8 +285,8 @@ $btnStart.Add_Click({
   $startTime=Get-Date; $done=0; $errs=0
   $rows = if([string]::IsNullOrWhiteSpace($logp)){ $null } else { New-Object System.Collections.Generic.List[object] }
 
-  foreach($p in $patterns){
-    foreach([string]$f in [System.IO.Directory]::EnumerateFiles($r.Source,$p,[System.IO.SearchOption]::AllDirectories)){
+  foreach ($p in $patterns) {
+    foreach ($f in [System.IO.Directory]::EnumerateFiles($r.Source, $p, [System.IO.SearchOption]::AllDirectories)) {
       if(-not (Test-Path -LiteralPath $f)) { continue }
 
       $rel = RelPath $r.Source $f
@@ -324,22 +327,18 @@ $btnStart.Add_Click({
     catch{ [System.Windows.Forms.MessageBox]::Show("Log write failed: " + $_.Exception.Message) }
   }
 
-  # --- Cleanup of empty source folders (only after MOVE, not dry run) ---
+  # Cleanup of empty source folders after MOVE (not dry run)
   if($move -and -not $dry){
     $lblStatus.Text="Status: cleaning up empty source folders..."
     [System.Windows.Forms.Application]::DoEvents()
-    # enumerate deepest-first by path length
     $dirs = [System.IO.Directory]::EnumerateDirectories($r.Source,'*',[System.IO.SearchOption]::AllDirectories) |
             Sort-Object { $_.Length } -Descending
     foreach($d in $dirs){
       try{
         $hasItems = [System.IO.Directory]::EnumerateFileSystemEntries($d) | Select-Object -First 1
-        if(-not $hasItems){
-          [System.IO.Directory]::Delete($d, $false)
-        }
+        if(-not $hasItems){ [System.IO.Directory]::Delete($d, $false) }
       } catch { }
     }
-    # Optionally try to remove source root if now empty (comment out to keep)
     try{
       $rootHas = [System.IO.Directory]::EnumerateFileSystemEntries($r.Source) | Select-Object -First 1
       if(-not $rootHas){ [System.IO.Directory]::Delete($r.Source, $false) }
