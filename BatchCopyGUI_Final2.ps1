@@ -1,7 +1,7 @@
-# BatchCopyGUI_Final.ps1
-# Clean UI + even distribution across batches + progress + ETA
-# Auto-delete empty source folders after MOVE (not in dry run)
-# PowerShell 5.1 compatible (ASCII only)
+# BatchCopyGUI_Final_Features.ps1
+# Copy/Move with balanced batch distribution, progress + ETA, Estimate, Cancel
+# Auto-delete empty source folders after MOVE (only if not cancelled)
+# PowerShell 5.1 compatible (ASCII only; no typed foreach; no ternary)
 
 # ---------- Bootstrap ----------
 if ($host.Runspace.ApartmentState -ne 'STA') {
@@ -74,106 +74,69 @@ function Get-TotalCount($root,$patterns) {
 function AnchorLR($ctrl){ $ctrl.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right }
 function AnchorBR($ctrl){ $ctrl.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right }
 
-# ---------- UI (wide, no truncation) ----------
+# ---------- UI ----------
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "Distribute Copy/Move - balanced batches (progress + ETA)"
 $form.StartPosition = 'CenterScreen'
 $form.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::Font
-$form.ClientSize = New-Object System.Drawing.Size(1180, 520)
-$form.MinimumSize = New-Object System.Drawing.Size(1000, 520)
+$form.ClientSize = New-Object System.Drawing.Size(1180, 540)
+$form.MinimumSize = New-Object System.Drawing.Size(1000, 540)
 $form.Font = New-Object System.Drawing.Font('Segoe UI', 9)
 
 # Row 1: Source
 $lblSrc = New-Object System.Windows.Forms.Label
 $lblSrc.Text = "Source root:"
-$lblSrc.Location = '16,18'
-$lblSrc.AutoSize = $true
-$form.Controls.Add($lblSrc)
+$lblSrc.Location = '16,18'; $lblSrc.AutoSize = $true; $form.Controls.Add($lblSrc)
 
 $txtSrc = New-Object System.Windows.Forms.TextBox
-$txtSrc.Location = '120,15'
-$txtSrc.Size = New-Object System.Drawing.Size(960,24)
-AnchorLR $txtSrc
-$form.Controls.Add($txtSrc)
+$txtSrc.Location = '120,15'; $txtSrc.Size = New-Object System.Drawing.Size(960,24); AnchorLR $txtSrc; $form.Controls.Add($txtSrc)
 
 $btnSrc = New-Object System.Windows.Forms.Button
-$btnSrc.Text = "Browse..."
-$btnSrc.Location = '1090,14'
-$btnSrc.Size = New-Object System.Drawing.Size(80,26)
-$form.Controls.Add($btnSrc)
+$btnSrc.Text = "Browse..."; $btnSrc.Location = '1090,14'; $btnSrc.Size = New-Object System.Drawing.Size(80,26); $form.Controls.Add($btnSrc)
 $btnSrc.Add_Click({ $d=New-Object System.Windows.Forms.FolderBrowserDialog; if($d.ShowDialog() -eq 'OK'){ $txtSrc.Text=$d.SelectedPath } })
 
 # Row 2: Destination
 $lblDst = New-Object System.Windows.Forms.Label
 $lblDst.Text = "Destination BASE:"
-$lblDst.Location = '16,52'
-$lblDst.AutoSize = $true
-$form.Controls.Add($lblDst)
+$lblDst.Location = '16,52'; $lblDst.AutoSize = $true; $form.Controls.Add($lblDst)
 
 $txtDst = New-Object System.Windows.Forms.TextBox
-$txtDst.Location = '120,49'
-$txtDst.Size = New-Object System.Drawing.Size(960,24)
-AnchorLR $txtDst
-$form.Controls.Add($txtDst)
+$txtDst.Location = '120,49'; $txtDst.Size = New-Object System.Drawing.Size(960,24); AnchorLR $txtDst; $form.Controls.Add($txtDst)
 
 $btnDst = New-Object System.Windows.Forms.Button
-$btnDst.Text = "Browse..."
-$btnDst.Location = '1090,48'
-$btnDst.Size = New-Object System.Drawing.Size(80,26)
-$form.Controls.Add($btnDst)
+$btnDst.Text = "Browse..."; $btnDst.Location = '1090,48'; $btnDst.Size = New-Object System.Drawing.Size(80,26); $form.Controls.Add($btnDst)
 $btnDst.Add_Click({ $d=New-Object System.Windows.Forms.FolderBrowserDialog; if($d.ShowDialog() -eq 'OK'){ $txtDst.Text=$d.SelectedPath } })
 
 # Row 3: Action + Distribution
 $grpAct = New-Object System.Windows.Forms.GroupBox
-$grpAct.Text="Action"
-$grpAct.Location='16,90'
-$grpAct.Size=New-Object System.Drawing.Size(240,80)
-$form.Controls.Add($grpAct)
+$grpAct.Text="Action"; $grpAct.Location='16,90'; $grpAct.Size=New-Object System.Drawing.Size(240,80); $form.Controls.Add($grpAct)
 
 $optCopy = New-Object System.Windows.Forms.RadioButton
-$optCopy.Text="Copy"; $optCopy.Location='14,32'; $optCopy.AutoSize=$true; $optCopy.Checked=$true
-$grpAct.Controls.Add($optCopy)
+$optCopy.Text="Copy"; $optCopy.Location='14,32'; $optCopy.AutoSize=$true; $optCopy.Checked=$true; $grpAct.Controls.Add($optCopy)
 
 $optMove = New-Object System.Windows.Forms.RadioButton
-$optMove.Text="Move"; $optMove.Location='90,32'; $optMove.AutoSize=$true
-$grpAct.Controls.Add($optMove)
+$optMove.Text="Move"; $optMove.Location='90,32'; $optMove.AutoSize=$true; $grpAct.Controls.Add($optMove)
 
 $grpMode = New-Object System.Windows.Forms.GroupBox
-$grpMode.Text="Distribution mode"
-$grpMode.Location='270,90'
-$grpMode.Size=New-Object System.Drawing.Size(900,80)
-AnchorLR $grpMode
-$form.Controls.Add($grpMode)
+$grpMode.Text="Distribution mode"; $grpMode.Location='270,90'; $grpMode.Size=New-Object System.Drawing.Size(900,80); AnchorLR $grpMode; $form.Controls.Add($grpMode)
 
 $optByBatches = New-Object System.Windows.Forms.RadioButton
-$optByBatches.Text="By number of batches"
-$optByBatches.Location='16,32'; $optByBatches.AutoSize=$true; $optByBatches.Checked=$true
-$grpMode.Controls.Add($optByBatches)
+$optByBatches.Text="By number of batches"; $optByBatches.Location='16,32'; $optByBatches.AutoSize=$true; $optByBatches.Checked=$true; $grpMode.Controls.Add($optByBatches)
 
 $lblBatches = New-Object System.Windows.Forms.Label
-$lblBatches.Text="Batches:"
-$lblBatches.Location='190,34'; $lblBatches.AutoSize=$true
-$grpMode.Controls.Add($lblBatches)
+$lblBatches.Text="Batches:"; $lblBatches.Location='190,34'; $lblBatches.AutoSize=$true; $grpMode.Controls.Add($lblBatches)
 
 $nudBatches = New-Object System.Windows.Forms.NumericUpDown
-$nudBatches.Minimum=1; $nudBatches.Maximum=100000; $nudBatches.Value=5
-$nudBatches.Location='250,30'; $nudBatches.Size=New-Object System.Drawing.Size(110,24)
-$grpMode.Controls.Add($nudBatches)
+$nudBatches.Minimum=1; $nudBatches.Maximum=100000; $nudBatches.Value=5; $nudBatches.Location='250,30'; $nudBatches.Size=New-Object System.Drawing.Size(110,24); $grpMode.Controls.Add($nudBatches)
 
 $optBySize = New-Object System.Windows.Forms.RadioButton
-$optBySize.Text="By files per batch (auto)"
-$optBySize.Location='400,32'; $optBySize.AutoSize=$true
-$grpMode.Controls.Add($optBySize)
+$optBySize.Text="By files per batch (auto)"; $optBySize.Location='400,32'; $optBySize.AutoSize=$true; $grpMode.Controls.Add($optBySize)
 
 $lblFilesPer = New-Object System.Windows.Forms.Label
-$lblFilesPer.Text="Files per batch:"
-$lblFilesPer.Location='580,34'; $lblFilesPer.AutoSize=$true
-$grpMode.Controls.Add($lblFilesPer)
+$lblFilesPer.Text="Files per batch:"; $lblFilesPer.Location='580,34'; $lblFilesPer.AutoSize=$true; $grpMode.Controls.Add($lblFilesPer)
 
 $nudFilesPer = New-Object System.Windows.Forms.NumericUpDown
-$nudFilesPer.Minimum=1; $nudFilesPer.Maximum=100000000; $nudFilesPer.Value=20000
-$nudFilesPer.Location='680,30'; $nudFilesPer.Size=New-Object System.Drawing.Size(120,24)
-$grpMode.Controls.Add($nudFilesPer)
+$nudFilesPer.Minimum=1; $nudFilesPer.Maximum=100000000; $nudFilesPer.Value=20000; $nudFilesPer.Location='680,30'; $nudFilesPer.Size=New-Object System.Drawing.Size(120,24); $grpMode.Controls.Add($nudFilesPer)
 
 $action = {
   if ($optByBatches.Checked) {
@@ -188,67 +151,52 @@ $optByBatches.Add_CheckedChanged($action)
 $optBySize.Add_CheckedChanged($action)
 $null = $action.Invoke()
 
-# Row 4: Prefix + Dry run
+# Row 4: Prefix
 $lblPrefix = New-Object System.Windows.Forms.Label
-$lblPrefix.Text="Batch folder prefix:"
-$lblPrefix.Location='16,188'; $lblPrefix.AutoSize=$true
-$form.Controls.Add($lblPrefix)
+$lblPrefix.Text="Batch folder prefix:"; $lblPrefix.Location='16,188'; $lblPrefix.AutoSize=$true; $form.Controls.Add($lblPrefix)
 
 $txtPrefix = New-Object System.Windows.Forms.TextBox
-$txtPrefix.Location='140,185'; $txtPrefix.Size=New-Object System.Drawing.Size(180,24); $txtPrefix.Text='batch_'
-$form.Controls.Add($txtPrefix)
-
-$chkDry = New-Object System.Windows.Forms.CheckBox
-$chkDry.Text="Dry run (no changes)"; $chkDry.Location='340,186'; $chkDry.AutoSize=$true
-$form.Controls.Add($chkDry)
+$txtPrefix.Location='140,185'; $txtPrefix.Size=New-Object System.Drawing.Size(180,24); $txtPrefix.Text='batch_'; $form.Controls.Add($txtPrefix)
 
 # Row 5: Filter
 $lblFilter = New-Object System.Windows.Forms.Label
-$lblFilter.Text="Optional file filter (e.g. *.jpg;*.png;*.pdf;*.docx):"
-$lblFilter.Location='16,222'; $lblFilter.AutoSize=$true
-$form.Controls.Add($lblFilter)
+$lblFilter.Text="Optional file filter (e.g. *.jpg;*.png;*.pdf;*.docx):"; $lblFilter.Location='16,222'; $lblFilter.AutoSize=$true; $form.Controls.Add($lblFilter)
 
 $txtFilter = New-Object System.Windows.Forms.TextBox
-$txtFilter.Location='320,219'; $txtFilter.Size=New-Object System.Drawing.Size(850,24); $txtFilter.Text='*'
-AnchorLR $txtFilter
-$form.Controls.Add($txtFilter)
+$txtFilter.Location='320,219'; $txtFilter.Size=New-Object System.Drawing.Size(850,24); $txtFilter.Text='*'; AnchorLR $txtFilter; $form.Controls.Add($txtFilter)
 
 # Row 6: CSV log
 $lblLog = New-Object System.Windows.Forms.Label
-$lblLog.Text="CSV log (optional):"
-$lblLog.Location='16,256'; $lblLog.AutoSize=$true
-$form.Controls.Add($lblLog)
+$lblLog.Text="CSV log (optional):"; $lblLog.Location='16,256'; $lblLog.AutoSize=$true; $form.Controls.Add($lblLog)
 
 $txtLog = New-Object System.Windows.Forms.TextBox
-$txtLog.Location='140,253'; $txtLog.Size=New-Object System.Drawing.Size(940,24)
-AnchorLR $txtLog
-$form.Controls.Add($txtLog)
+$txtLog.Location='140,253'; $txtLog.Size=New-Object System.Drawing.Size(940,24); AnchorLR $txtLog; $form.Controls.Add($txtLog)
 
 $btnLog = New-Object System.Windows.Forms.Button
-$btnLog.Text="Choose..."
-$btnLog.Location='1090,252'; $btnLog.Size=New-Object System.Drawing.Size(80,26)
-$form.Controls.Add($btnLog)
+$btnLog.Text="Choose..."; $btnLog.Location='1090,252'; $btnLog.Size=New-Object System.Drawing.Size(80,26); $form.Controls.Add($btnLog)
 $btnLog.Add_Click({ $dlg=New-Object System.Windows.Forms.SaveFileDialog; $dlg.Filter="CSV files (*.csv)|*.csv|All files (*.*)|*.*"; if($dlg.ShowDialog() -eq 'OK'){ $txtLog.Text=$dlg.FileName } })
 
-# Row 7: Progress panel
+# Row 7: Progress + controls
 $progress = New-Object System.Windows.Forms.ProgressBar
-$progress.Location='16,300'; $progress.Size=New-Object System.Drawing.Size(1154,28); $progress.Style='Continuous'
-AnchorLR $progress
-$form.Controls.Add($progress)
+$progress.Location='16,300'; $progress.Size=New-Object System.Drawing.Size(1154,28); $progress.Style='Continuous'; AnchorLR $progress; $form.Controls.Add($progress)
 
 $lblStatus = New-Object System.Windows.Forms.Label
-$lblStatus.Text="Status: idle"; $lblStatus.Location='16,340'; $lblStatus.AutoSize=$true
-$form.Controls.Add($lblStatus)
+$lblStatus.Text="Status: idle"; $lblStatus.Location='16,340'; $lblStatus.AutoSize=$true; $form.Controls.Add($lblStatus)
 
 $lblETA = New-Object System.Windows.Forms.Label
-$lblETA.Text="ETA: --:--"; $lblETA.Location='16,364'; $lblETA.AutoSize=$true
-$form.Controls.Add($lblETA)
+$lblETA.Text="ETA: --:--"; $lblETA.Location='16,364'; $lblETA.AutoSize=$true; $form.Controls.Add($lblETA)
+
+$btnEstimate = New-Object System.Windows.Forms.Button
+$btnEstimate.Text="Estimate count"; $btnEstimate.Location='796,410'; $btnEstimate.Size=New-Object System.Drawing.Size(120,36); AnchorBR $btnEstimate; $form.Controls.Add($btnEstimate)
+
+$btnCancel = New-Object System.Windows.Forms.Button
+$btnCancel.Text="Cancel"; $btnCancel.Location='922,410'; $btnCancel.Size=New-Object System.Drawing.Size(120,36); $btnCancel.Enabled=$false; AnchorBR $btnCancel; $form.Controls.Add($btnCancel)
 
 $btnStart = New-Object System.Windows.Forms.Button
-$btnStart.Text="Start"
-$btnStart.Location='1048,410'; $btnStart.Size=New-Object System.Drawing.Size(120,36)
-AnchorBR $btnStart
-$form.Controls.Add($btnStart)
+$btnStart.Text="Start"; $btnStart.Location='1048,410'; $btnStart.Size=New-Object System.Drawing.Size(120,36); AnchorBR $btnStart; $form.Controls.Add($btnStart)
+
+# Cancel flag
+$script:cancelRequested = $false
 
 # ---------- Core ----------
 function Validate-Roots {
@@ -258,17 +206,45 @@ function Validate-Roots {
   @{ Source=$s; DestBase=$d }
 }
 
+$btnEstimate.Add_Click({
+  $r=Validate-Roots; if(-not $r){ return }
+  $patterns=($txtFilter.Text.Trim() -split ';' | ForEach-Object { if([string]::IsNullOrWhiteSpace($_)){'*'} else { $_ } })
+  $total = Get-TotalCount $r.Source $patterns
+  if ($total -le 0) { $lblStatus.Text="Status: no matching files"; return }
+
+  if($optBySize.Checked){
+    $filesPer=[int]$nudFilesPer.Value
+    $batches=[int][Math]::Ceiling($total / [double]$filesPer)
+  } else { $batches=[int]$nudBatches.Value }
+
+  $approxPer = [int][Math]::Ceiling($total / [double]$batches)
+  $lblStatus.Text="Status: estimated $total files; planned $batches batches (~$approxPer files per batch)"
+  $progress.Minimum=0; $progress.Maximum=$total; $progress.Value=0
+  $lblETA.Text="ETA: --:--"
+})
+
+$btnCancel.Add_Click({
+  $script:cancelRequested = $true
+  $btnCancel.Enabled = $false
+  $lblStatus.Text = "Status: cancelling... finishing current file"
+})
+
 $btnStart.Add_Click({
   $btnStart.Enabled=$false
-  $r=Validate-Roots; if(-not $r){ $btnStart.Enabled=$true; return }
+  $btnEstimate.Enabled=$false
+  $btnCancel.Enabled=$true
+  $script:cancelRequested = $false
+  $cancelled = $false
+
+  $r=Validate-Roots; if(-not $r){ $btnStart.Enabled=$true; $btnEstimate.Enabled=$true; $btnCancel.Enabled=$false; return }
 
   $prefix=$txtPrefix.Text.Trim(); if([string]::IsNullOrWhiteSpace($prefix)){ $prefix='batch_' }
   $patterns=($txtFilter.Text.Trim() -split ';' | ForEach-Object { if([string]::IsNullOrWhiteSpace($_)){'*'} else { $_ } })
-  $move=$optMove.Checked; $dry=$chkDry.Checked
+  $move=$optMove.Checked
   $logp=$txtLog.Text.Trim()
 
   $total = Get-TotalCount $r.Source $patterns
-  if($total -le 0){ [System.Windows.Forms.MessageBox]::Show("No matching files found."); $btnStart.Enabled=$true; return }
+  if($total -le 0){ [System.Windows.Forms.MessageBox]::Show("No matching files found."); $btnStart.Enabled=$true; $btnEstimate.Enabled=$true; $btnCancel.Enabled=$false; return }
 
   if($optBySize.Checked){
     $filesPer=[int]$nudFilesPer.Value
@@ -286,7 +262,9 @@ $btnStart.Add_Click({
   $rows = if([string]::IsNullOrWhiteSpace($logp)){ $null } else { New-Object System.Collections.Generic.List[object] }
 
   foreach ($p in $patterns) {
+    if ($script:cancelRequested) { $cancelled = $true; break }
     foreach ($f in [System.IO.Directory]::EnumerateFiles($r.Source, $p, [System.IO.SearchOption]::AllDirectories)) {
+      if ($script:cancelRequested) { $cancelled = $true; break }
       if(-not (Test-Path -LiteralPath $f)) { continue }
 
       $rel = RelPath $r.Source $f
@@ -296,10 +274,9 @@ $btnStart.Add_Click({
 
       $act = if($move){"Move"} else {"Copy"}
       try{
-        if(-not $dry){
-          if($move){ Move-FileCompat -Source $f -Destination $tgt }
-          else     { [System.IO.File]::Copy($f,$tgt,$true) }
-        }
+        if($move){ Move-FileCompat -Source $f -Destination $tgt }
+        else     { [System.IO.File]::Copy($f,$tgt,$true) }
+
         if($rows){
           $rows.Add([pscustomobject]@{Timestamp=Get-Date;Action=$act;Status='Done';Source=$f;Target=$tgt;Batch=$bi;Message='OK'}) | Out-Null
         }
@@ -320,6 +297,7 @@ $btnStart.Add_Click({
         [System.Windows.Forms.Application]::DoEvents()
       }
     }
+    if ($cancelled) { break }
   }
 
   if($rows){
@@ -327,8 +305,7 @@ $btnStart.Add_Click({
     catch{ [System.Windows.Forms.MessageBox]::Show("Log write failed: " + $_.Exception.Message) }
   }
 
-  # Cleanup of empty source folders after MOVE (not dry run)
-  if($move -and -not $dry){
+  if (-not $cancelled -and $move) {
     $lblStatus.Text="Status: cleaning up empty source folders..."
     [System.Windows.Forms.Application]::DoEvents()
     $dirs = [System.IO.Directory]::EnumerateDirectories($r.Source,'*',[System.IO.SearchOption]::AllDirectories) |
@@ -345,10 +322,18 @@ $btnStart.Add_Click({
     } catch { }
   }
 
-  $lblStatus.Text="Status: COMPLETE - $done files, $errs errors, $batches batches"
-  $lblETA.Text="ETA: 00:00"
-  [System.Windows.Forms.MessageBox]::Show("Complete: $done files, $errs errors across $batches batches.","Done",0,64) | Out-Null
+  if ($cancelled) {
+    $lblStatus.Text="Status: CANCELLED - $done files processed, $errs errors"
+    [System.Windows.Forms.MessageBox]::Show("Cancelled: $done files processed, $errs errors.","Cancelled",0,48) | Out-Null
+  } else {
+    $lblStatus.Text="Status: COMPLETE - $done files, $errs errors, $batches batches"
+    $lblETA.Text="ETA: 00:00"
+    [System.Windows.Forms.MessageBox]::Show("Complete: $done files, $errs errors across $batches batches.","Done",0,64) | Out-Null
+  }
+
   $btnStart.Enabled=$true
+  $btnEstimate.Enabled=$true
+  $btnCancel.Enabled=$false
 })
 
 [void]$form.ShowDialog()
